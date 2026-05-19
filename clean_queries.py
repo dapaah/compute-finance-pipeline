@@ -57,14 +57,19 @@ def build_local_data_warehouse():
         -- Handle server crash anomalies (The Left Join Trap protection fallback)
         WHERE end_time IS NOT NULL
     ),
-    compute_metrics AS (
+    ccompute_metrics AS (
         SELECT 
             c.fiscal_month,
             c.team_name,
             (c.gpu_count * c.duration_hours) AS total_gpu_hours,
-            (c.gpu_count * c.duration_hours * v.hourly_rate_per_gpu) AS job_cost
+            -- IF a contract rate is missing, flag it with a 1.5x On-Demand penalty rate
+            CASE 
+                WHEN v.hourly_rate_per_gpu IS NOT NULL THEN (c.gpu_count * c.duration_hours * v.hourly_rate_per_gpu)
+                ELSE (c.gpu_count * c.duration_hours * 3.50 * 1.5) -- $3.50 base penalty multiplied by 1.5x risk premium
+            END AS job_cost
         FROM cleansed_logs c
-        INNER JOIN vendor_rate_cards v 
+        -- Switch from INNER JOIN to LEFT JOIN to protect against disappearing data
+        LEFT JOIN vendor_rate_cards v 
            ON c.provider = v.provider 
           AND c.gpu_type = v.gpu_type
     )
